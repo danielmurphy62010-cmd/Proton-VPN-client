@@ -1,0 +1,6 @@
+/target
+/data
+*.log
+session.json
+*.conf
+*.ovpn

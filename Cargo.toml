@@ -1,45 +1,21 @@
 [package]
-name = "pvc-core"
-version = "0.1.0"
-edition = "2021"
-description = "Custom Proton VPN client core: local HTTP proxy, multi-tunnel manager, Tor supervisor"
-
-[features]
-# Only toggles the serde derives on the pure-logic modules (stats, priority) so they can be
-# compiled and unit-tested with plain rustc. Leave enabled for the real build.
-default = ["serde"]
-serde = []
-
-[[bin]]
-name = "pvc-core"
-path = "src/main.rs"
-
+name="proton-vpn-client"
+version="0.1.0"
+edition="2021"
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "socks"] }
-anyhow = "1"
-async-trait = "0.1"
-base64 = "0.22"
-sha2 = "0.10"
-rand = "0.8"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Userspace WireGuard (no TUN device, no admin): boringtun for the protocol, smoltcp for the TCP/IP stack.
-# boringtun's Tunn::new signature changed between 0.5 (returns Result) and 0.6 (returns Self); this code targets 0.6.
-boringtun = { version = "0.6", default-features = false }
-smoltcp = { version = "0.12", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "socket-tcp", "socket-dns", "proto-dns"] }
-
+anyhow="1"
+chrono={version="0.4",features=["serde"]}
+directories="5"
+ping="0.5"
+qmetaobject="0.2"
+rand="0.8"
+reqwest={version="0.12",features=["json","cookies","rustls-tls"],default-features=false}
+serde={version="1",features=["derive"]}
+serde_json="1"
+tokio={version="1",features=["full"]}
+toml="0.8"
+tracing="0.1"
+tracing-subscriber={version="0.3",features=["env-filter"]}
+uuid={version="1",features=["v4","serde"]}
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
-    "Win32_Foundation",
-    "Win32_Security",
-    "Win32_System_JobObjects",
-    "Win32_System_Threading",
-] }
-
-[profile.release]
-lto = true
-codegen-units = 1
-strip = true
+windows-sys={version="0.59",features=["Win32_Foundation","Win32_System_JobObjects","Win32_System_Threading"]}
