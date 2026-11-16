@@ -280,6 +280,10 @@ impl ProtonVpnCredentials {
     pub fn wireguard_private_key_base64(&self) -> String {
         BASE64.encode(self.wireguard_private_key.to_bytes())
     }
+
+    pub fn wireguard_private_key_bytes(&self) -> [u8; 32] {
+        self.wireguard_private_key.to_bytes()
+    }
 }
 
 fn ed25519_public_key_pem(signing_key: &SigningKey) -> String {
