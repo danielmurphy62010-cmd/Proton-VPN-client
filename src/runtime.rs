@@ -285,9 +285,10 @@ async fn refresh_servers(State(state): State<ApiState>) -> Result<Json<Vec<Proto
     let snapshot = api::fetch_snapshot(&cfg.proton_api_base, &credentials).await.map_err(api_error)?;
     let servers = snapshot.servers.clone();
 
-    let cached_status = state.app.vpn_credentials.read().await.as_ref().map(|value| value.status.expiration_time);
+    let cached_status = state.app.vpn_credentials.read().await.as_ref()
+        .map(|value| (value.status.refresh_time, value.status.expiration_time));
     let now = chrono::Utc::now().timestamp();
-    if cached_status.map(|expiry| expiry <= now + 300).unwrap_or(true) {
+    if cached_status.map(|(refresh, expiry)| refresh <= now || expiry <= now + 300).unwrap_or(true) {
         let vpn_credentials = api::request_connection_credentials(&cfg.proton_api_base, &credentials)
             .await.map_err(api_error)?;
         *state.app.vpn_credentials.write().await = Some(Arc::new(vpn_credentials));
