@@ -142,10 +142,18 @@ impl AppState {
             rt.message = format!("Tor executable not found: {}", cfg.tor_executable.display());
             return Ok(());
         }
-        fs::create_dir_all("./data/tor")?;
+        let data_dir = std::env::current_dir()?.join("data").join("tor");
+        fs::create_dir_all(&data_dir)?;
         let mut command = Command::new(&cfg.tor_executable);
-        command.args(["--SocksPort", "127.0.0.1:9050", "--DataDirectory", "./data/tor"])
-            .kill_on_drop(true);
+        // Run from the extracted Tor folder so geoip, geoip6 and bundled
+        // transport binaries resolve relative to the Tor Expert Bundle.
+        if let Some(tor_dir) = cfg.tor_executable.parent() {
+            command.current_dir(tor_dir);
+        }
+        command.args([
+            "--SocksPort", "127.0.0.1:9050",
+            "--DataDirectory", data_dir.to_string_lossy().as_ref(),
+        ]).kill_on_drop(true);
         match command.spawn() {
             Ok(child) => {
                 rt.tor_child = Some(child);
