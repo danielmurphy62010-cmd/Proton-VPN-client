@@ -62,7 +62,7 @@ public:
         layout->addLayout(toolbar);
 
         m_view = new QWebEngineView(this);
-        const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        const QString appData = QCoreApplication::applicationDirPath() + "/data";
         m_profile = new QWebEngineProfile("ProtonTorLogin", this);
         m_profile->setPersistentStoragePath(appData + "/tor-login-profile");
         m_profile->setCachePath(appData + "/tor-login-cache");
@@ -601,6 +601,50 @@ int main(int argc, char **argv) {
     QCoreApplication::setApplicationName("ProtonVpnClient");
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
+
+    app.setStyle("Fusion");
+    QPalette palette;
+    palette.setColor(QPalette::Window, QColor("#020617"));
+    palette.setColor(QPalette::WindowText, QColor("#f1f5f9"));
+    palette.setColor(QPalette::Base, QColor("#0b1220"));
+    palette.setColor(QPalette::AlternateBase, QColor("#111c31"));
+    palette.setColor(QPalette::ToolTipBase, QColor("#0f172a"));
+    palette.setColor(QPalette::ToolTipText, QColor("#f8fafc"));
+    palette.setColor(QPalette::Text, QColor("#e2e8f0"));
+    palette.setColor(QPalette::Button, QColor("#1e293b"));
+    palette.setColor(QPalette::ButtonText, QColor("#e2e8f0"));
+    palette.setColor(QPalette::BrightText, QColor("#ffffff"));
+    palette.setColor(QPalette::Highlight, QColor("#4338ca"));
+    palette.setColor(QPalette::HighlightedText, QColor("#ffffff"));
+    app.setPalette(palette);
+    app.setStyleSheet(R"QSS(
+        QWidget { color:#e2e8f0; background:#020617; font-family:"Segoe UI",Arial; font-size:9pt; }
+        QMainWindow, QDialog { background:#020617; }
+        QLabel { background:transparent; }
+        QTabWidget::pane { background:#0f172a; border:1px solid #1e293b; border-radius:12px; top:-1px; }
+        QTabBar::tab { color:#94a3b8; background:#0b1220; border:1px solid #1e293b; padding:11px 18px; margin-right:4px; border-top-left-radius:8px; border-top-right-radius:8px; }
+        QTabBar::tab:selected { color:#fff; background:#312e81; border-color:#4338ca; }
+        QTabBar::tab:hover:!selected { color:#f8fafc; background:#172033; }
+        QPushButton { color:#e2e8f0; background:#1e293b; border:1px solid #334155; border-radius:8px; padding:8px 13px; min-height:18px; font-weight:600; }
+        QPushButton:hover { background:#334155; border-color:#475569; }
+        QPushButton:pressed { background:#4338ca; }
+        QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox,QPlainTextEdit { color:#e2e8f0; background:#020617; selection-background-color:#4338ca; border:1px solid #334155; border-radius:8px; padding:8px 10px; min-height:18px; }
+        QLineEdit:focus,QComboBox:focus,QSpinBox:focus,QDoubleSpinBox:focus,QPlainTextEdit:focus { border:1px solid #818cf8; }
+        QComboBox QAbstractItemView { color:#e2e8f0; background:#0f172a; border:1px solid #475569; selection-background-color:#4338ca; }
+        QTableWidget { color:#e2e8f0; background:#0f172a; alternate-background-color:#111c31; border:1px solid #1e293b; gridline-color:#1e293b; selection-background-color:#312e81; }
+        QTableWidget::item { padding:8px; border-bottom:1px solid #1e293b; }
+        QHeaderView::section { color:#94a3b8; background:#0f172a; border:0; border-bottom:1px solid #334155; padding:10px; font-weight:600; }
+        QScrollBar:vertical { background:#0b1220; width:10px; margin:2px; }
+        QScrollBar::handle:vertical { background:#334155; min-height:24px; border-radius:5px; }
+        QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
+        QCheckBox { spacing:8px; }
+        QCheckBox::indicator { width:16px; height:16px; }
+        QMenu { color:#e2e8f0; background:#0f172a; border:1px solid #334155; padding:5px; }
+        QMenu::item { padding:8px 24px 8px 12px; border-radius:5px; }
+        QMenu::item:selected { color:#fff; background:#3730a3; }
+        QToolTip { color:#f8fafc; background:#0f172a; border:1px solid #475569; padding:5px; }
+    )QSS");
+
 
     const QString api = qEnvironmentVariable("PROTON_CLIENT_API");
     const QString token = qEnvironmentVariable("PROTON_CLIENT_TOKEN");
