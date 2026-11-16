@@ -6,6 +6,8 @@ mod metrics;
 mod process;
 mod proxy;
 mod runtime;
+#[cfg(windows)]
+mod wireguard;
 
 use anyhow::{Context, Result};
 use config::AppConfig;
