@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
-use sha2::Sha512;
+use sha2::{Digest, Sha512};
 use x25519_dalek::StaticSecret;
 
 use reqwest::{
@@ -302,7 +302,7 @@ fn ed25519_public_key_pem(signing_key: &SigningKey) -> String {
 fn ed25519_seed_to_x25519_secret(seed: &[u8; 32]) -> StaticSecret {
     // RFC 7748 conversion used by Proton's Ed25519 -> X25519 key derivation:
     // SHA-512(seed), take first 32 octets, then clamp as an X25519 scalar.
-    let digest = sha2::Digest::digest(&mut Sha512::new(), seed);
+    let digest = Sha512::digest(seed);
     let mut scalar = [0u8; 32];
     scalar.copy_from_slice(&digest[..32]);
     scalar[0] &= 248;
