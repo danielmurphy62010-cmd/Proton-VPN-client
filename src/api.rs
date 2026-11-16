@@ -1,4 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
+use sha2::Sha512;
+use x25519_dalek::StaticSecret;
+
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, USER_AGENT},
     Client, Proxy,
@@ -227,6 +234,134 @@ struct SmartProtocolResponse {
     openvpn_udp: Option<bool>,
     #[serde(rename = "OpenVPNTCP")]
     openvpn_tcp: Option<bool>,
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProtonCertificateStatus {
+    pub expiration_time: i64,
+    pub refresh_time: i64,
+    pub server_public_key: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct CertificateRequest {
+    client_public_key: String,
+    client_public_key_mode: &'static str,
+    device_name: &'static str,
+    duration: Option<String>,
+    mode: &'static str,
+    features: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct CertificateResponse {
+    #[serde(rename = "Certificate", default)]
+    certificate: String,
+    #[serde(rename = "ExpirationTime", default)]
+    expiration_time: i64,
+    #[serde(rename = "RefreshTime", default)]
+    refresh_time: i64,
+    #[serde(rename = "ServerPublicKey")]
+    server_public_key: Option<String>,
+}
+
+// This key material intentionally isn't Serialize. It lives only for this process lifetime.
+pub struct ProtonVpnCredentials {
+    _ed25519_signing_key: SigningKey,
+    wireguard_private_key: StaticSecret,
+    pub client_public_key_pem: String,
+    pub certificate_pem: String,
+    pub status: ProtonCertificateStatus,
+}
+
+impl ProtonVpnCredentials {
+    pub fn wireguard_private_key_base64(&self) -> String {
+        BASE64.encode(self.wireguard_private_key.to_bytes())
+    }
+}
+
+fn ed25519_public_key_pem(signing_key: &SigningKey) -> String {
+    // RFC 8410 SubjectPublicKeyInfo for Ed25519:
+    // SEQUENCE(AlgorithmIdentifier(Ed25519), BIT STRING(public key)).
+    const SPKI_PREFIX: [u8; 12] = [
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+    ];
+    let mut der = Vec::with_capacity(SPKI_PREFIX.len() + 32);
+    der.extend_from_slice(&SPKI_PREFIX);
+    der.extend_from_slice(&signing_key.verifying_key().to_bytes());
+    let encoded = BASE64.encode(der);
+    let lines = encoded.as_bytes().chunks(64)
+        .map(|line| std::str::from_utf8(line).expect("base64 output is ASCII"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("-----BEGIN PUBLIC KEY-----\n{lines}\n-----END PUBLIC KEY-----")
+}
+
+fn ed25519_seed_to_x25519_secret(seed: &[u8; 32]) -> StaticSecret {
+    // RFC 7748 conversion used by Proton's Ed25519 -> X25519 key derivation:
+    // SHA-512(seed), take first 32 octets, then clamp as an X25519 scalar.
+    let digest = sha2::Digest::digest(&mut Sha512::new(), seed);
+    let mut scalar = [0u8; 32];
+    scalar.copy_from_slice(&digest[..32]);
+    scalar[0] &= 248;
+    scalar[31] &= 127;
+    scalar[31] |= 64;
+    StaticSecret::from(scalar)
+}
+
+pub async fn request_connection_credentials(
+    base_url: &str,
+    credentials: &ApiCredentials,
+) -> Result<ProtonVpnCredentials> {
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let client_public_key_pem = ed25519_public_key_pem(&signing_key);
+    let wireguard_private_key = ed25519_seed_to_x25519_secret(&signing_key.to_bytes());
+
+    let request_body = CertificateRequest {
+        client_public_key: client_public_key_pem.clone(),
+        client_public_key_mode: "EC",
+        device_name: "",
+        duration: None,
+        mode: "session",
+        features: Vec::new(),
+    };
+
+    let client = proton_client(base_url, credentials)?;
+    let url = format!("{}/vpn/v1/certificate", base_url.trim_end_matches('/'));
+    let response: CertificateResponse = client
+        .post(url)
+        .json(&request_body)
+        .send()
+        .await
+        .context("requesting Proton device certificate through Tor")?
+        .error_for_status()
+        .context("Proton rejected the device certificate request")?
+        .json()
+        .await
+        .context("decoding Proton device certificate response")?;
+
+    if response.certificate.trim().is_empty() {
+        bail!("Proton returned an empty device certificate");
+    }
+    if response.expiration_time <= chrono::Utc::now().timestamp() {
+        bail!("Proton returned an expired device certificate");
+    }
+
+    let status = ProtonCertificateStatus {
+        expiration_time: response.expiration_time,
+        refresh_time: response.refresh_time,
+        server_public_key: response.server_public_key,
+    };
+
+    Ok(ProtonVpnCredentials {
+        _ed25519_signing_key: signing_key,
+        wireguard_private_key,
+        client_public_key_pem,
+        certificate_pem: response.certificate,
+        status,
+    })
 }
 
 fn proton_client(base_url: &str, credentials: &ApiCredentials) -> Result<Client> {

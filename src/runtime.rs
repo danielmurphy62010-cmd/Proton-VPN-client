@@ -36,6 +36,7 @@ pub struct AppState {
     credentials: Arc<RwLock<Option<ApiCredentials>>>,
     servers: Arc<RwLock<Vec<ProtonServer>>>,
     proton_snapshot: Arc<RwLock<Option<api::ProtonSnapshot>>>,
+    vpn_credentials: Arc<RwLock<Option<Arc<api::ProtonVpnCredentials>>>>,
 }
 struct RuntimeState {
     status: String,
@@ -95,6 +96,7 @@ impl AppState {
             credentials: Arc::new(RwLock::new(None)),
             servers: Arc::new(RwLock::new(Vec::new())),
             proton_snapshot: Arc::new(RwLock::new(None)),
+            vpn_credentials: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -267,6 +269,9 @@ async fn set_session(State(state): State<ApiState>, Json(payload): Json<SessionP
     *state.app.credentials.write().await = Some(ApiCredentials {
         access_token: payload.access_token, uid: payload.uid,
     });
+    *state.app.vpn_credentials.write().await = None;
+    *state.app.proton_snapshot.write().await = None;
+    *state.app.servers.write().await = Vec::new();
     Ok(Json(serde_json::json!({ "present": true, "storage": "memory_only" })))
 }
 async fn get_servers(State(state): State<ApiState>) -> Json<Vec<ProtonServer>> {
@@ -279,6 +284,15 @@ async fn refresh_servers(State(state): State<ApiState>) -> Result<Json<Vec<Proto
     let cfg = state.app.config.read().await.clone();
     let snapshot = api::fetch_snapshot(&cfg.proton_api_base, &credentials).await.map_err(api_error)?;
     let servers = snapshot.servers.clone();
+
+    let cached_status = state.app.vpn_credentials.read().await.as_ref().map(|value| value.status.expiration_time);
+    let now = chrono::Utc::now().timestamp();
+    if cached_status.map(|expiry| expiry <= now + 300).unwrap_or(true) {
+        let vpn_credentials = api::request_connection_credentials(&cfg.proton_api_base, &credentials)
+            .await.map_err(api_error)?;
+        *state.app.vpn_credentials.write().await = Some(Arc::new(vpn_credentials));
+    }
+
     *state.app.servers.write().await = servers.clone();
     *state.app.proton_snapshot.write().await = Some(snapshot);
     Ok(Json(servers))
