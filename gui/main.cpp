@@ -81,7 +81,7 @@ public:
             else if (name == "x-pm-uid") uid = it.value().trimmed();
         }
 
-        if (!authorization.startsWith("Bearer ", Qt::CaseInsensitive) ||
+        if (!authorization.toLower().startsWith("bearer ") ||
             uid.isEmpty() || uid.size() > 512) return;
 
         const QByteArray token = authorization.mid(7).trimmed();
