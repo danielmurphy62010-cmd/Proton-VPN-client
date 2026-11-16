@@ -102,7 +102,7 @@ fn resolve_app_path(path: &std::path::Path) -> PathBuf {
         if let Some(dir) = executable.parent() {
             // Tor Expert Bundle is expected to be extracted beside the app:
             // <app folder>/Tor/tor.exe. Also accept common flat/nested layouts.
-            if path.file_name().is_some_and(|name| name.eq_ignore_ascii_case("tor.exe")) {
+            if path.file_name().is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("tor.exe")) {
                 for candidate in [
                     dir.join("Tor").join("tor.exe"),
                     dir.join("tor.exe"),
