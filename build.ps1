@@ -14,6 +14,23 @@ if (-not $QtRoot) { throw "Set QT_ROOT or Qt6_DIR to your Qt 6 installation pref
 Write-Host "Building Rust supervisor..."
 cargo build --release
 
+# Wintun is the official signed Windows L3 adapter runtime required by the native WireGuard engine.
+$WintunZip = Join-Path $env:TEMP "wintun-0.14.1.zip"
+$WintunRoot = Join-Path $env:TEMP "wintun-0.14.1"
+Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile $WintunZip
+$WintunHash = (Get-FileHash -Path $WintunZip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($WintunHash -ne "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51") {
+    throw "Wintun archive SHA-256 mismatch: $WintunHash"
+}
+Expand-Archive -LiteralPath $WintunZip -DestinationPath $WintunRoot -Force
+$WintunDll = Join-Path $WintunRoot "wintun/bin/amd64/wintun.dll"
+$WintunLicense = Join-Path $WintunRoot "wintun/LICENSE.txt"
+if (-not (Test-Path $WintunDll) -or -not (Test-Path $WintunLicense)) {
+    throw "The verified Wintun archive is missing its AMD64 DLL or license."
+}
+Copy-Item $WintunDll (Join-Path $PSScriptRoot "target/release/wintun.dll") -Force
+Copy-Item $WintunLicense (Join-Path $PSScriptRoot "target/release/WINTUN-LICENSE.txt") -Force
+
 $BuildDir = Join-Path $PSScriptRoot "build/gui"
 Write-Host "Building Qt 6 tray GUI..."
 cmake -S (Join-Path $PSScriptRoot "gui") -B $BuildDir -DCMAKE_PREFIX_PATH="$QtRoot" -DCMAKE_BUILD_TYPE=Release
