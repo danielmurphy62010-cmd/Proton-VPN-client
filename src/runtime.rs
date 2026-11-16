@@ -11,7 +11,7 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{get, post},
     Json, Router,
 };
 use rand::{seq::SliceRandom, thread_rng};
@@ -448,7 +448,7 @@ pub async fn run_supervisors(app: AppState) {
             }
         }
         if let Some(exit) = vpn_exit {
-            match cfg.final_fallback {
+            match &cfg.final_fallback {
                 FinalFallback::Tor => {
                     if let Err(error) = app.start_tor_if_needed().await {
                         tracing::warn!(%error, "Tor fallback could not start");
@@ -503,7 +503,7 @@ pub async fn run_supervisors(app: AppState) {
         }
 
         let benchmark_mode_supports_rotation = matches!(
-            cfg.mode, Mode::Smart | Mode::OpenVpn | Mode::WireGuard | Mode::Stealth
+            &cfg.mode, Mode::Smart | Mode::OpenVpn | Mode::WireGuard | Mode::Stealth
         );
         if cfg.benchmark.enabled
             && benchmark_mode_supports_rotation
@@ -547,7 +547,9 @@ async fn probe_cloudflare(route: ProxyRoute) -> Option<Duration> {
     let result = tokio::time::timeout(Duration::from_secs(4), async {
         match route {
             ProxyRoute::Tor => {
-                let stream = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", "1.1.1.1:443").await?;
+                let stream = tokio_socks::tcp::Socks5Stream::connect("127.0.0.1:9050", "1.1.1.1:443")
+                    .await
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error.to_string()))?;
                 drop(stream);
                 Ok::<(), std::io::Error>(())
             }
