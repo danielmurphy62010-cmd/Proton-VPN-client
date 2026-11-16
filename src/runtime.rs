@@ -118,7 +118,7 @@ impl AppState {
                 _ => ProxyRoute::SystemRoute,
             }
         } else {
-            match cfg.final_fallback {
+            match &cfg.final_fallback {
                 FinalFallback::Tor => ProxyRoute::Tor,
                 FinalFallback::Lan => ProxyRoute::SystemRoute,
             }
