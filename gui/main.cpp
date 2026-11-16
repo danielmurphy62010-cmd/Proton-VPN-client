@@ -203,6 +203,7 @@ private:
     QLabel *m_fallbackValue{};
     QLabel *m_activeConnection{};
     QTableWidget *m_metrics{};
+    QLabel *m_protonSummary{};
     QList<QPushButton *> m_navButtons;
     QList<QPushButton *> m_modeButtons;
     QList<QPushButton *> m_fallbackButtons;
@@ -576,9 +577,14 @@ private:
         auto *serversTitle = new QLabel("Proton Logical Servers");
         serversTitle->setObjectName("sectionTitle");
         serversBody->addWidget(serversTitle);
-        auto *serversDesc = new QLabel("Retrieved from Proton after API authentication.");
+        auto *serversDesc = new QLabel("Retrieved from Proton after API authentication. Account, endpoint, port and device-certificate details are fetched through Tor.");
         serversDesc->setObjectName("mutedText");
+        serversDesc->setWordWrap(true);
         serversBody->addWidget(serversDesc);
+        m_protonSummary = new QLabel("Proton API data not loaded. Sign in, then refresh.");
+        m_protonSummary->setObjectName("mutedText");
+        m_protonSummary->setWordWrap(true);
+        serversBody->addWidget(m_protonSummary);
         m_servers = new QTableWidget(0, 7);
         m_servers->setObjectName("dataTable");
         m_servers->setHorizontalHeaderLabels({"Server", "Country", "City", "Load", "Tier", "Protocol", "Entry IP"});
@@ -592,7 +598,10 @@ private:
         auto *refreshServers = new QPushButton("Refresh Proton server list");
         connect(refreshServers, &QPushButton::clicked, this, [this] {
             auto doc = request("POST", "/api/servers/refresh");
-            if (!doc.isNull()) populateServers(doc.array());
+            if (!doc.isNull()) {
+                populateServers(doc.array());
+                refreshProtonSnapshot();
+            }
         });
         serversBody->addWidget(refreshServers);
         profilesOuter->addWidget(serversCard, 4);
@@ -716,6 +725,11 @@ private:
                 m_authLabel->setText("API session loaded (memory only)");
                 m_accessToken->clear();
                 refreshStatus();
+                const auto servers = request("POST", "/api/servers/refresh", {}, true);
+                if (!servers.isNull()) {
+                    populateServers(servers.array());
+                    refreshProtonSnapshot();
+                }
             }
         });
         connect(openBrowser, &QPushButton::clicked, this, [this] { openTorBrowser(); });
@@ -840,7 +854,10 @@ private:
 
             QTimer::singleShot(0, this, [this] {
                 const auto servers = request("POST", "/api/servers/refresh", {}, true);
-                if (!servers.isNull()) populateServers(servers.array());
+                if (!servers.isNull()) {
+                    populateServers(servers.array());
+                    refreshProtonSnapshot();
+                }
             });
         }, Qt::QueuedConnection);
         dialog->show();
@@ -1056,6 +1073,55 @@ private:
         m_subtitle->setText(QString("Local proxy: %1  |  %2").arg(status.value("proxy_bind").toString(m_proxyAddress),
             torRunning ? "Tor running" : "Tor inactive"));
         if (!activeName.isEmpty()) m_status->setToolTip("Active route: " + activeName);
+    }
+
+
+    void refreshProtonSnapshot() {
+        if (!m_protonSummary) return;
+        const auto snapshot = request("GET", "/api/proton/snapshot", {}, true).object();
+        if (snapshot.isEmpty()) return;
+
+        const auto vpn = snapshot.value("vpn").toObject();
+        const auto client = snapshot.value("client_config").toObject();
+        const auto ports = client.value("default_ports").toObject();
+        const auto wg = ports.value("wireguard").toObject();
+        const auto ovpn = ports.value("openvpn").toObject();
+        const auto smart = client.value("smart_protocol").toObject();
+
+        auto portText = [](const QJsonValue &value) {
+            QStringList out;
+            for (const auto &item : value.toArray()) out << QString::number(item.toInt());
+            return out.isEmpty() ? QString("—") : out.join(", ");
+        };
+        QStringList available;
+        if (smart.value("wireguard_udp").toBool()) available << "WireGuard UDP";
+        if (smart.value("wireguard_tcp").toBool()) available << "WireGuard TCP";
+        if (smart.value("wireguard_tls").toBool()) available << "WireGuard TLS";
+        if (smart.value("openvpn_udp").toBool()) available << "OpenVPN UDP";
+        if (smart.value("openvpn_tcp").toBool()) available << "OpenVPN TCP";
+
+        const auto credentialStatus = request("GET", "/api/proton/credential-status", {}, true).object();
+        const auto cert = credentialStatus.value("certificate").toObject();
+        const QString certText = credentialStatus.value("present").toBool()
+            ? QString("device certificate acquired; refresh epoch %1, expiry epoch %2")
+                .arg(QString::number(cert.value("refresh_time").toVariant().toLongLong()))
+                .arg(QString::number(cert.value("expiration_time").toVariant().toLongLong()))
+            : "device certificate not acquired";
+
+        const QString plan = vpn.value("plan_title").toString(vpn.value("plan_name").toString("Unknown plan"));
+        const QString maxConnections = vpn.value("max_connect").isDouble()
+            ? QString::number(vpn.value("max_connect").toInt()) : QString("unknown");
+        const QString protocols = available.isEmpty() ? QString("not reported") : available.join(", ");
+        m_protonSummary->setText(
+            QString("Plan: %1  |  Max connections: %2\n"
+                    "Smart protocols: %3\n"
+                    "WireGuard ports — UDP: %4  TCP: %5  TLS: %6\n"
+                    "OpenVPN ports — UDP: %7  TCP: %8\n"
+                    "API device credentials: %9")
+                .arg(plan).arg(maxConnections).arg(protocols)
+                .arg(portText(wg.value("udp"))).arg(portText(wg.value("tcp")))
+                .arg(portText(wg.value("tls"))).arg(portText(ovpn.value("udp")))
+                .arg(portText(ovpn.value("tcp"))).arg(certText));
     }
 
     void refreshMetrics() {
