@@ -62,7 +62,7 @@ public:
         layout->addLayout(toolbar);
 
         m_view = new QWebEngineView(this);
-        auto *appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        const QString appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         m_profile = new QWebEngineProfile("ProtonTorLogin", this);
         m_profile->setPersistentStoragePath(appData + "/tor-login-profile");
         m_profile->setCachePath(appData + "/tor-login-cache");
