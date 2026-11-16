@@ -20,7 +20,7 @@ Install Rust stable with the MSVC toolchain, CMake, and Qt 6.5+ with Widgets, Ne
 ./build.ps1
 ```
 
-This produces `target/release/proton-vpn-client.exe` and `target/release/proton-vpn-gui.exe`. The build is portable: extract the Tor Expert Bundle into a `Tor` folder beside `proton-vpn-client.exe`, so the executable is at `./Tor/tor.exe`. The client assumes Tor is already present and never downloads or installs it. It also accepts `./tor.exe` and the older `./Tor/tor/tor.exe` layout. Configuration is stored in `./config/config.toml`; runtime data, Tor state and browser profile are stored under `./data/`. Existing per-user config is copied into the portable config folder on first launch when one exists.
+This produces `target/release/proton-vpn-client.exe` and `target/release/proton-vpn-gui.exe`. The build is portable. Keep the existing Tor Expert Bundle layout extracted beside `proton-vpn-client.exe`: `Tor/tor/tor.exe`, `Tor/data/geoip`, and `Tor/data/geoip6` (when supplied by the bundle). The client assumes Tor is already installed in that folder; it does not download, extract, or install Tor. Tor runtime state is stored in `Tor/state/`. Application configuration is stored in `config/config.toml`, and application logs, metrics, and browser profile data are stored under the portable application folder. Existing per-user config is copied into the portable config folder on first launch when one exists.
 
 ## Proton API authentication
 

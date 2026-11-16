@@ -142,18 +142,33 @@ impl AppState {
             rt.message = format!("Tor executable not found: {}", cfg.tor_executable.display());
             return Ok(());
         }
-        let data_dir = std::env::current_dir()?.join("data").join("tor");
-        fs::create_dir_all(&data_dir)?;
-        let mut command = Command::new(&cfg.tor_executable);
-        // Run from the extracted Tor folder so geoip, geoip6 and bundled
-        // transport binaries resolve relative to the Tor Expert Bundle.
-        if let Some(tor_dir) = cfg.tor_executable.parent() {
-            command.current_dir(tor_dir);
+        let tor_bin_dir = cfg.tor_executable.parent()
+            .context("Tor executable path has no parent directory")?;
+        let tor_root = tor_bin_dir.parent()
+            .context("Tor executable must be inside Tor/tor/tor.exe")?;
+        let tor_data_dir = tor_root.join("data");
+        let tor_state_dir = tor_root.join("state");
+        fs::create_dir_all(&tor_state_dir)?;
+        if !tor_bin_dir.join("tor.exe").is_file() {
+            bail!("Tor executable not found at the configured portable path: {}", cfg.tor_executable.display());
         }
-        command.args([
-            "--SocksPort", "127.0.0.1:9050",
-            "--DataDirectory", data_dir.to_string_lossy().as_ref(),
-        ]).kill_on_drop(true);
+
+        let mut command = Command::new(&cfg.tor_executable);
+        // Preserve the Tor Expert Bundle layout:
+        // Tor/tor/tor.exe, Tor/data/{geoip,geoip6}, Tor/state.
+        command.current_dir(tor_bin_dir);
+        command.args(["--SocksPort", "127.0.0.1:9050", "--DataDirectory"])
+            .arg(&tor_state_dir)
+            .args(["--ClientOnly", "1", "--Log", "notice stdout"]);
+        let geoip = tor_data_dir.join("geoip");
+        let geoip6 = tor_data_dir.join("geoip6");
+        if geoip.is_file() {
+            command.arg("--GeoIPFile").arg(&geoip);
+        }
+        if geoip6.is_file() {
+            command.arg("--GeoIPv6File").arg(&geoip6);
+        }
+        command.kill_on_drop(true);
         match command.spawn() {
             Ok(child) => {
                 rt.tor_child = Some(child);

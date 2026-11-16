@@ -93,7 +93,7 @@ impl Default for AppConfig {
             benchmark: BenchmarkConfig::default(),
             proton_api_base: "https://vpn-api.proton.me".into(),
             proxy_bind: "127.0.0.1:8080".into(),
-            tor_executable: "./Tor/tor.exe".into(),
+            tor_executable: "./Tor/tor/tor.exe".into(),
             openvpn_executable: "openvpn.exe".into(),
             wireguard_go_executable: "wireguard-go.exe".into(),
             wg_executable: "wg.exe".into(), stealth_executable: None,
