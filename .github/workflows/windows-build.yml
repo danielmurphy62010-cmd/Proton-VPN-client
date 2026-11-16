@@ -57,6 +57,21 @@ jobs:
           Copy-Item $guiExe $stagedGui -Force
           Copy-Item (Join-Path $PWD "README.md") (Join-Path $packageRoot "README.md") -Force
 
+          $wintunZip = Join-Path $env:RUNNER_TEMP "wintun-0.14.1.zip"
+          $wintunRoot = Join-Path $env:RUNNER_TEMP "wintun-0.14.1"
+          Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile $wintunZip
+          $wintunHash = (Get-FileHash -Path $wintunZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($wintunHash -ne "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51") {
+            throw "Wintun archive SHA-256 mismatch: $wintunHash"
+          }
+          Expand-Archive -LiteralPath $wintunZip -DestinationPath $wintunRoot -Force
+          $wintunDll = Join-Path $wintunRoot "wintun/bin/amd64/wintun.dll"
+          $wintunLicense = Join-Path $wintunRoot "wintun/LICENSE.txt"
+          if (-not (Test-Path $wintunDll)) { throw "The verified Wintun archive did not contain the AMD64 DLL." }
+          if (-not (Test-Path $wintunLicense)) { throw "Wintun redistribution license missing from the verified archive." }
+          Copy-Item $wintunDll (Join-Path $packageRoot "wintun.dll") -Force
+          Copy-Item $wintunLicense (Join-Path $packageRoot "WINTUN-LICENSE.txt") -Force
+
           $qmake = (Get-Command qmake -ErrorAction Stop).Source
           $qtBin = Split-Path $qmake -Parent
           $winDeployQt = Join-Path $qtBin "windeployqt.exe"
