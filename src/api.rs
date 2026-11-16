@@ -368,7 +368,7 @@ pub async fn request_connection_credentials(
     })
 }
 
-fn proton_client(base_url: &str, credentials: &ApiCredentials) -> Result<Client> {
+fn proton_client(_base_url: &str, credentials: &ApiCredentials) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert("x-pm-apiversion", HeaderValue::from_static("3"));
     headers.insert("x-pm-appversion", HeaderValue::from_static("proton-vpn-client@0.3.0"));
