@@ -35,3 +35,41 @@ jobs:
           cmake -S gui -B build/gui -DCMAKE_PREFIX_PATH="$qtRoot" -DCMAKE_BUILD_TYPE=Release
       - name: Build Qt GUI
         run: cmake --build build/gui --config Release
+      - name: Package Windows client
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $packageRoot = Join-Path $PWD "dist/proton-vpn-client"
+          New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
+
+          $rustExe = Join-Path $PWD "target/release/proton-vpn-client.exe"
+          $guiCandidates = @(
+            (Join-Path $PWD "build/gui/Release/proton-vpn-gui.exe"),
+            (Join-Path $PWD "build/gui/proton-vpn-gui.exe")
+          )
+          $guiExe = $guiCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not (Test-Path $rustExe)) { throw "Rust supervisor executable missing: $rustExe" }
+          if (-not $guiExe) { throw "Qt GUI executable missing from build/gui." }
+
+          Copy-Item $rustExe (Join-Path $packageRoot "proton-vpn-client.exe") -Force
+          $stagedGui = Join-Path $packageRoot "proton-vpn-gui.exe"
+          Copy-Item $guiExe $stagedGui -Force
+          Copy-Item (Join-Path $PWD "README.md") (Join-Path $packageRoot "README.md") -Force
+
+          $qmake = (Get-Command qmake -ErrorAction Stop).Source
+          $qtBin = Split-Path $qmake -Parent
+          $winDeployQt = Join-Path $qtBin "windeployqt.exe"
+          if (-not (Test-Path $winDeployQt)) { throw "windeployqt.exe not found: $winDeployQt" }
+
+          & $winDeployQt --release --compiler-runtime --no-translations --dir $packageRoot $stagedGui
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed with exit code $LASTEXITCODE" }
+
+          Compress-Archive -Path (Join-Path $packageRoot "*") -DestinationPath (Join-Path $PWD "dist/proton-vpn-client-windows-x64.zip") -Force
+      - name: Upload Windows build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-vpn-client-windows-x64
+          path: dist/proton-vpn-client-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
