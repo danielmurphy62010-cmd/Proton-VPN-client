@@ -18,9 +18,11 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> Result<()> {
     let _job = JobGuard::new().context("creating Windows kill-on-close process job")?;
-    fs::create_dir_all("./data")?;
-    let log_dir = directories::ProjectDirs::from("com", "Community", "ProtonVpnClient")
-        .map(|p| p.data_local_dir().to_path_buf()).unwrap_or_else(|| PathBuf::from("./data"));
+    let executable = std::env::current_exe().context("locating the portable application directory")?;
+    let app_dir = executable.parent().context("application executable has no parent directory")?;
+    std::env::set_current_dir(app_dir).context("setting the working directory to the application folder")?;
+    fs::create_dir_all("./data/logs")?;
+    let log_dir = PathBuf::from("./data/logs");
     fs::create_dir_all(&log_dir)?;
     let log_file = tracing_appender::rolling::never(log_dir, "client.log");
     let (writer, _log_guard) = tracing_appender::non_blocking(log_file);
@@ -90,12 +92,32 @@ async fn main() -> Result<()> {
 }
 
 fn resolve_app_path(path: &std::path::Path) -> PathBuf {
-    if path.is_absolute() || path.exists() { return path.to_path_buf(); }
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    if path.exists() {
+        return path.to_path_buf();
+    }
     if let Ok(executable) = std::env::current_exe() {
         if let Some(dir) = executable.parent() {
+            // Tor Expert Bundle is expected to be extracted beside the app:
+            // <app folder>/Tor/tor.exe. Also accept common flat/nested layouts.
+            if path.file_name().is_some_and(|name| name.eq_ignore_ascii_case("tor.exe")) {
+                for candidate in [
+                    dir.join("Tor").join("tor.exe"),
+                    dir.join("tor.exe"),
+                    dir.join("Tor").join("tor").join("tor.exe"),
+                ] {
+                    if candidate.is_file() {
+                        return candidate;
+                    }
+                }
+            }
             for ancestor in dir.ancestors().take(5) {
                 let candidate = ancestor.join(path);
-                if candidate.exists() { return candidate; }
+                if candidate.exists() {
+                    return candidate;
+                }
             }
         }
     }
