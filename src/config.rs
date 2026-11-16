@@ -93,7 +93,7 @@ impl Default for AppConfig {
             benchmark: BenchmarkConfig::default(),
             proton_api_base: "https://vpn-api.proton.me".into(),
             proxy_bind: "127.0.0.1:8080".into(),
-            tor_executable: "./Tor/tor/tor.exe".into(),
+            tor_executable: "./Tor/tor.exe".into(),
             openvpn_executable: "openvpn.exe".into(),
             wireguard_go_executable: "wireguard-go.exe".into(),
             wg_executable: "wg.exe".into(), stealth_executable: None,
@@ -104,14 +104,28 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn path() -> PathBuf {
+        let app_dir = std::env::current_exe().ok()
+            .and_then(|p| p.parent().map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("."));
+        app_dir.join("config").join("config.toml")
+    }
+
+    fn legacy_path() -> Option<PathBuf> {
         ProjectDirs::from("com", "Community", "ProtonVpnClient")
             .map(|p| p.config_dir().join("config.toml"))
-            .unwrap_or_else(|| PathBuf::from("config.toml"))
     }
 
     pub fn load_or_default() -> Result<Self> {
         let path = Self::path();
         if !path.exists() {
+            if let Some(legacy) = Self::legacy_path().filter(|p| p.is_file()) {
+                let raw = fs::read_to_string(&legacy)
+                    .with_context(|| format!("reading previous config {}", legacy.display()))?;
+                let value: Self = toml::from_str(&raw).context("parsing previous config.toml")?;
+                value.validate()?;
+                value.save()?;
+                return Ok(value);
+            }
             let value = Self::default();
             value.save()?;
             return Ok(value);
