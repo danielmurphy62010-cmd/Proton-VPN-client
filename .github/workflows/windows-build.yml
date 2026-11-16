@@ -1,0 +1,37 @@
+name: Windows build
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtwebengine
+      - name: Rust format and tests
+        shell: pwsh
+        run: |
+          cargo fmt --all
+          cargo test
+          cargo build --release
+      - name: Configure Qt GUI
+        shell: pwsh
+        run: |
+          $qmake = (Get-Command qmake -ErrorAction Stop).Source
+          $qtRoot = Split-Path (Split-Path $qmake -Parent) -Parent
+          cmake -S gui -B build/gui -DCMAKE_PREFIX_PATH="$qtRoot" -DCMAKE_BUILD_TYPE=Release
+      - name: Build Qt GUI
+        run: cmake --build build/gui --config Release

@@ -1,6 +1,9 @@
 /target
+/build
 /data
 *.log
-session.json
-*.conf
 *.ovpn
+*.conf
+*.key
+*.pem
+session.json

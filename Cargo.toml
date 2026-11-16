@@ -1,21 +1,31 @@
 [package]
-name="proton-vpn-client"
-version="0.1.0"
-edition="2021"
+name = "proton-vpn-client"
+version = "0.2.0"
+edition = "2021"
+description = "Qt 6 tray client with a Rust networking supervisor"
+license = "MIT"
+
 [dependencies]
-anyhow="1"
-chrono={version="0.4",features=["serde"]}
-directories="5"
-ping="0.5"
-qmetaobject="0.2"
-rand="0.8"
-reqwest={version="0.12",features=["json","cookies","rustls-tls"],default-features=false}
-serde={version="1",features=["derive"]}
-serde_json="1"
-tokio={version="1",features=["full"]}
-toml="0.8"
-tracing="0.1"
-tracing-subscriber={version="0.3",features=["env-filter"]}
-uuid={version="1",features=["v4","serde"]}
+anyhow = "1"
+axum = { version = "0.7", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+directories = "5"
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-socks = "0.5"
+toml = "0.8"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+
 [target.'cfg(windows)'.dependencies]
-windows-sys={version="0.59",features=["Win32_Foundation","Win32_System_JobObjects","Win32_System_Threading"]}
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
