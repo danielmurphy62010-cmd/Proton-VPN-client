@@ -32,6 +32,8 @@
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QAbstractItemView>
+#include <QWebEngineUrlRequestInfo>
+#include <QWebEngineUrlRequestInterceptor>
 #include <QFrame>
 #include <QHash>
 #include <QList>
@@ -50,7 +52,54 @@
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
 #include <QWebEngineView>
+#include <atomic>
 #include <utility>
+
+class ProtonAuthInterceptor final : public QWebEngineUrlRequestInterceptor {
+    Q_OBJECT
+public:
+    explicit ProtonAuthInterceptor(QObject *parent = nullptr)
+        : QWebEngineUrlRequestInterceptor(parent) {}
+
+    void interceptRequest(QWebEngineUrlRequestInfo &info) override {
+        if (m_reported.load()) return;
+
+        const QUrl url = info.requestUrl();
+        const QString host = url.host().toLower();
+        const bool protonHost =
+            host == "proton.me" || host.endsWith(".proton.me") ||
+            host == "protonvpn.com" || host.endsWith(".protonvpn.com") ||
+            host == "protonmail.com" || host.endsWith(".protonmail.com");
+        if (url.scheme() != "https" || !protonHost) return;
+
+        QByteArray authorization;
+        QByteArray uid;
+        const auto headers = info.httpHeaders();
+        for (auto it = headers.cbegin(); it != headers.cend(); ++it) {
+            const QByteArray name = it.key().toLower();
+            if (name == "authorization") authorization = it.value().trimmed();
+            else if (name == "x-pm-uid") uid = it.value().trimmed();
+        }
+
+        if (!authorization.startsWith("Bearer ", Qt::CaseInsensitive) ||
+            uid.isEmpty() || uid.size() > 512) return;
+
+        const QByteArray token = authorization.mid(7).trimmed();
+        if (token.isEmpty() || token.size() > 8192) return;
+
+        bool expected = false;
+        if (!m_reported.compare_exchange_strong(expected, true)) return;
+        emit credentialsObserved(QString::fromUtf8(token), QString::fromUtf8(uid));
+    }
+
+    void allowRetry() { m_reported.store(false); }
+
+signals:
+    void credentialsObserved(const QString &accessToken, const QString &uid);
+
+private:
+    std::atomic_bool m_reported{false};
+};
 
 class TorLoginDialog final : public QDialog {
     Q_OBJECT
@@ -71,6 +120,10 @@ public:
         toolbar->addWidget(m_address, 1);
         toolbar->addWidget(go);
         layout->addLayout(toolbar);
+        auto *hint = new QLabel("Sign in normally. This window closes automatically after Proton's authenticated API session is detected.");
+        hint->setWordWrap(true);
+        hint->setStyleSheet("color:#94a3b8; padding:2px 4px;");
+        layout->addWidget(hint);
 
         m_view = new QWebEngineView(this);
         const QString appData = QCoreApplication::applicationDirPath() + "/data";
@@ -79,6 +132,10 @@ public:
         m_profile->setPersistentStoragePath(appData + "/tor-login-profile");
         m_profile->setCachePath(appData + "/tor-login-cache");
         m_profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+        m_authInterceptor = new ProtonAuthInterceptor(m_profile);
+        m_profile->setUrlRequestInterceptor(m_authInterceptor);
+        connect(m_authInterceptor, &ProtonAuthInterceptor::credentialsObserved,
+                this, &TorLoginDialog::credentialsCaptured, Qt::QueuedConnection);
         m_view->setPage(new QWebEnginePage(m_profile, m_view));
         layout->addWidget(m_view, 1);
 
@@ -90,10 +147,19 @@ public:
         connect(m_view, &QWebEngineView::urlChanged, this, [this](const QUrl &url) { m_address->setText(url.toString()); });
         m_view->load(QUrl(m_address->text()));
     }
+public:
+    void allowCredentialRetry() {
+        if (m_authInterceptor) m_authInterceptor->allowRetry();
+    }
+
+signals:
+    void credentialsCaptured(const QString &accessToken, const QString &uid);
+
 private:
     QLineEdit *m_address{};
     QWebEngineView *m_view{};
     QWebEngineProfile *m_profile{};
+    ProtonAuthInterceptor *m_authInterceptor{};
 };
 
 class MainWindow final : public QMainWindow {
@@ -637,7 +703,7 @@ private:
         authForm->addRow("API access token", m_accessToken);
         authForm->addRow("API session UID", m_uid);
         authForm->addRow(authActions);
-        auto *authNote = new QLabel("The Tor browser stores website cookies separately. Signing in there does not automatically populate the API access token and UID required for the server list.");
+        auto *authNote = new QLabel("The embedded browser watches HTTPS requests to Proton-owned domains for Proton's standard Authorization Bearer and x-pm-uid headers. When both are observed, they are sent to the local API in memory and the browser closes after the API accepts them. The browser password and cookies are never read by this integration.");
         authNote->setObjectName("mutedText");
         authNote->setWordWrap(true);
         authForm->addRow(authNote);
@@ -746,6 +812,36 @@ private:
         dialog->setWindowFlag(Qt::Window, true);
         m_loginBrowser = dialog;
         connect(dialog, &QObject::destroyed, this, [this] { m_loginBrowser = nullptr; });
+        connect(dialog, &TorLoginDialog::credentialsCaptured, this,
+                [this, dialog](const QString &accessToken, const QString &uid) {
+            if (m_authCaptureInProgress) return;
+            m_authCaptureInProgress = true;
+
+            const QJsonObject body{{"access_token", accessToken}, {"uid", uid}};
+            const auto session = request("POST", "/api/auth/session", body, true);
+            if (session.isNull()) {
+                m_authCaptureInProgress = false;
+                dialog->allowCredentialRetry();
+                QMessageBox::warning(this, "Proton sign-in",
+                    "Proton's API credentials were detected, but the local client could not accept the session. "
+                    "The sign-in window will remain open so it can retry.");
+                return;
+            }
+
+            m_authLabel->setText("API session detected and loaded (memory only)");
+            m_accessToken->clear();
+            m_uid->clear();
+            refreshStatus();
+
+            // Close only after the local Rust API has accepted the token/UID pair.
+            dialog->close();
+            m_authCaptureInProgress = false;
+
+            QTimer::singleShot(0, this, [this] {
+                const auto servers = request("POST", "/api/servers/refresh", {}, true);
+                if (!servers.isNull()) populateServers(servers.array());
+            });
+        }, Qt::QueuedConnection);
         dialog->show();
         dialog->raise();
         dialog->activateWindow();
