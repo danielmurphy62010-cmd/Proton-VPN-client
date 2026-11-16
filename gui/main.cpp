@@ -32,6 +32,10 @@
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QAbstractItemView>
+#include <QFrame>
+#include <QHash>
+#include <QList>
+#include <QPair>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
