@@ -39,7 +39,7 @@ enum OwnedResult {
 fn own_result(result: TunnResult<'_>) -> OwnedResult {
     match result {
         TunnResult::Done => OwnedResult::Done,
-        TunnResult::Err(error) => OwnedResult::Error(error.to_string()),
+        TunnResult::Err(error) => OwnedResult::Error(format!("{error:?}")),
         TunnResult::WriteToNetwork(packet) => OwnedResult::Network(packet.to_vec()),
         TunnResult::WriteToTunnelV4(packet, _) => OwnedResult::Tunnel(packet.to_vec()),
         TunnResult::WriteToTunnelV6(packet, _) => OwnedResult::Tunnel(packet.to_vec()),
@@ -278,7 +278,7 @@ impl WireGuardTunnel {
         // Wintun reads synchronously; isolate the blocking reader from Tokio's executor.
         {
             let reader_session = session.clone();
-            let mut cancel = shutdown.subscribe();
+            let cancel = shutdown.subscribe();
             tasks.push(tokio::task::spawn_blocking(move || {
                 loop {
                     if *cancel.borrow() {
