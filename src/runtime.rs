@@ -5,9 +5,6 @@ use crate::{
     process::{self, stop_child},
 };
 use anyhow::{bail, Context, Result};
-use base64::Engine as _;
-#[cfg(windows)]
-use crate::wireguard::WireGuardTunnel;
 use axum::{
     body::Body,
     extract::{Request, State},
@@ -46,8 +43,6 @@ struct RuntimeState {
     message: String,
     active: Option<ActiveConnection>,
     vpn_child: Option<Child>,
-    #[cfg(windows)]
-    wg_tunnel: Option<WireGuardTunnel>,
     tor_child: Option<Child>,
     active_connection_counted: bool,
     metrics: HashMap<String, ProfileMetrics>,
@@ -82,8 +77,6 @@ pub struct SessionPayload { pub access_token: String, pub uid: String }
 #[derive(Deserialize)]
 pub struct ConnectPayload {
     pub profile_id: Option<String>,
-    pub server_id: Option<String>,
-    pub protocol: Option<String>,
 }
 #[derive(Deserialize)]
 pub struct ImportPayload {
@@ -100,8 +93,6 @@ impl AppState {
             runtime: Arc::new(Mutex::new(RuntimeState {
                 status: "starting".into(), message: "Starting Tor and local proxy".into(),
                 active: None, vpn_child: None,
-                #[cfg(windows)]
-                wg_tunnel: None,
                 tor_child: None,
                 active_connection_counted: false, metrics: HashMap::new(),
             })),
@@ -217,8 +208,6 @@ impl AppState {
     pub async fn stop_all(&self) {
         let mut rt = self.runtime.lock().await;
         if let Some(mut child) = rt.vpn_child.take() { stop_child(&mut child).await; }
-        #[cfg(windows)]
-        if let Some(tunnel) = rt.wg_tunnel.take() { tunnel.stop().await; }
         if let Some(mut child) = rt.tor_child.take() { stop_child(&mut child).await; }
         rt.active = None;
         rt.active_connection_counted = false;
@@ -357,21 +346,12 @@ async fn remove_profile(State(state): State<ApiState>, Json(payload): Json<serde
     Ok(Json(serde_json::json!({ "removed": id })))
 }
 async fn connect(State(state): State<ApiState>, Json(payload): Json<ConnectPayload>) -> Result<Json<StatusView>, (StatusCode, String)> {
-    if let Some(server_id) = payload.server_id.as_deref() {
-        if payload.protocol.as_deref().unwrap_or("wireguard_udp") != "wireguard_udp" {
-            return Err((StatusCode::BAD_REQUEST, "The native adapter currently supports Proton WireGuard UDP only.".into()));
-        }
-        connect_proton_wireguard(&state.app, server_id).await.map_err(api_error)?;
-    } else {
-        connect_internal(&state.app, payload.profile_id.as_deref()).await.map_err(api_error)?;
-    }
+    connect_internal(&state.app, payload.profile_id.as_deref()).await.map_err(api_error)?;
     Ok(Json(state.app.status().await))
 }
 async fn disconnect(State(state): State<ApiState>) -> Result<Json<StatusView>, (StatusCode, String)> {
     let mut rt = state.app.runtime.lock().await;
     if let Some(mut child) = rt.vpn_child.take() { stop_child(&mut child).await; }
-    #[cfg(windows)]
-    if let Some(tunnel) = rt.wg_tunnel.take() { tunnel.stop().await; }
     rt.active = None;
     rt.active_connection_counted = false;
     rt.status = "disconnected".into();
@@ -419,77 +399,6 @@ fn extract_endpoint(path: &std::path::Path, protocol: &Mode) -> Result<(Option<S
     Ok((None, None))
 }
 
-
-#[cfg(windows)]
-async fn connect_proton_wireguard(app: &AppState, requested_server_id: &str) -> Result<()> {
-    {
-        let rt = app.runtime.lock().await;
-        if rt.active.is_some() {
-            bail!("A route is already active. Disconnect it before changing Proton servers.");
-        }
-    }
-
-    let snapshot = app.proton_snapshot.read().await.clone()
-        .context("Proton server data is not loaded; sign in and refresh the server list first")?;
-    let vpn_credentials = app.vpn_credentials.read().await.clone()
-        .context("Proton device credentials are not available; refresh the Proton server list first")?;
-
-    let server = snapshot.servers.iter()
-        .find(|server| server.id == requested_server_id)
-        .context("The selected Proton server is not present in the current API snapshot")?;
-    if server.status == 0 {
-        bail!("The selected Proton server is under maintenance");
-    }
-
-    let endpoint = server.endpoints.iter()
-        .filter(|endpoint| endpoint.protocol == "wireguard_udp")
-        .filter(|endpoint| endpoint.port.is_some())
-        .filter(|endpoint| endpoint.server_public_key.as_ref().is_some_and(|key| !key.is_empty()))
-        .min_by_key(|endpoint| endpoint.port.unwrap_or(u16::MAX))
-        .context("Proton did not return a WireGuard UDP endpoint, port, and peer public key for this server")?;
-
-    let endpoint_addr: std::net::SocketAddr = format!("{}:{}", endpoint.ip, endpoint.port.unwrap())
-        .parse()
-        .context("Proton returned an invalid WireGuard UDP endpoint")?;
-    let peer_key = base64::engine::general_purpose::STANDARD
-        .decode(endpoint.server_public_key.as_deref().unwrap_or_default())
-        .context("decoding Proton WireGuard peer public key")?;
-    let peer_key: [u8; 32] = peer_key.try_into()
-        .map_err(|_| anyhow::anyhow!("Proton WireGuard peer public key was not 32 bytes"))?;
-
-    let tunnel = crate::wireguard::WireGuardTunnel::start(
-        endpoint_addr,
-        vpn_credentials.wireguard_private_key_bytes(),
-        peer_key,
-    ).await?;
-
-    let mut rt = app.runtime.lock().await;
-    if rt.active.is_some() {
-        drop(rt);
-        tunnel.stop().await;
-        bail!("Another connection became active while the WireGuard tunnel was starting");
-    }
-    rt.wg_tunnel = Some(tunnel);
-    rt.active_connection_counted = false;
-    rt.active = Some(ActiveConnection {
-        profile_id: None,
-        profile_name: server.name.clone(),
-        protocol: Mode::WireGuard,
-        route: "system".into(),
-        since: chrono::Utc::now().to_rfc3339(),
-    });
-    rt.status = "connected".into();
-    rt.message = format!(
-        "Native WireGuard UDP tunnel established to Proton {} ({}:{})",
-        server.name, endpoint.ip, endpoint.port.unwrap()
-    );
-    Ok(())
-}
-
-#[cfg(not(windows))]
-async fn connect_proton_wireguard(_app: &AppState, _requested_server_id: &str) -> Result<()> {
-    bail!("The native Proton WireGuard adapter is currently available only in the Windows build");
-}
 
 pub async fn connect_internal(app: &AppState, requested_id: Option<&str>) -> Result<()> {
     {

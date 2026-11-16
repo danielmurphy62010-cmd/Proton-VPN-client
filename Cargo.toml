@@ -28,11 +28,8 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(windows)'.dependencies]
 boringtun = "0.7.1"
-wintun = "0.5.1"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
-[build-dependencies]
-winres = "0.1.12"
 
 [profile.release]
 lto = true

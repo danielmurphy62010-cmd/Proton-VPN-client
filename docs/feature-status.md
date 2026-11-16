@@ -2,24 +2,19 @@
 
 | Feature | Status | Notes |
 |---|---|---|
-| Card-based Qt GUI | Implemented in source | Connections, Analytics, Profiles & Servers, Config; main window is visible at startup. |
-| Non-modal Proton sign-in window | Implemented in source | Can be used without blocking the main client. |
-| Browser login detection | Implemented in source | Captures Proton Bearer and UID headers from HTTPS Proton-domain requests; does not read password or cookies. |
-| Proton account/plan API | Implemented in source | `GET /vpn/v2`; routed through Tor. |
-| Proton logical servers | Implemented in source | `GET /vpn/v2/logicals`; includes protocol-specific relay addresses and metadata. |
-| Proton client protocol/port settings | Implemented in source | `GET /vpn/v2/clientconfig`; server-advertised ports are used rather than guessed. |
-| Proton device certificate request | Implemented in source | Generates Ed25519 keypair and calls `POST /vpn/v1/certificate`; issued certificate and key remain memory-only. |
-| Ed25519 to X25519 client key derivation | Implemented in source | Mirrors the conversion used by Proton's Windows client. |
-| Proton API over Tor | Implemented in source | Reqwest client uses `socks5h://127.0.0.1:9050`; startup and API refresh fail closed if Tor is unavailable. |
-| API-driven connection plan/configuration | Not yet implemented | API snapshot and device credentials are fetched, but they are not yet used to create a live tunnel. |
-| No imported VPN profiles | Not yet implemented | Current connection path still depends on user-imported `.ovpn` / `.conf` profiles. |
-| Bundled native OpenVPN engine | Not implemented | Existing process adapter still expects an external OpenVPN executable. |
-| Native WireGuard engine | Not implemented | Existing process adapter still expects wireguard-go and wg executables and does not bundle them. |
-| Proton Stealth without ProTun | Not implemented | No compatible alternative has been implemented. Do not label generic WireGuard TLS as Proton Stealth. |
-| Local HTTP CONNECT proxy | Implemented in source | Loopback only at `127.0.0.1:8080`; explicit proxy, not transparent system-wide routing. |
-| Tor supervision | Implemented in source | Starts the existing portable Tor Expert Bundle before launching the client. |
-| Multiple simultaneous independent VPN routes | Not implemented | Existing backend only supports one active system route; no per-interface routing engine. |
-| Ping telemetry | Partial | TCP connect to `1.1.1.1:443`, not ICMP; attributed to active profile only. |
-| Benchmark mode | Partial | Separate interval/weights and profile rotation remain tied to imported profiles. |
+| Qt GUI and tray | Implemented in source | Card-based layout and embedded Proton sign-in browser. |
+| Proton browser authentication | Implemented in source | Captures authenticated Bearer/UID headers, not passwords or cookies. |
+| Proton API through Tor | Implemented in source | API requests use Tor SOCKS5H at `127.0.0.1:9050`; no direct fallback. |
+| Proton account/server/client configuration | Implemented in source | Account plan, protocol endpoints, ports and Smart Protocol settings fetched from the API. |
+| Device certificate provisioning | Implemented in source | Ed25519 client key and certificate requested; key and cert retained in process memory. |
+| Explicit HTTP proxy | Implemented in source | Binds to `127.0.0.1:8080`; HTTP absolute-form and HTTPS CONNECT. |
+| Proxy via Tor | Implemented in source | Existing SOCKS5 route. |
+| Proxy via system route | Implemented in source | Direct connection through the normal Windows network. |
+| Proxy via Proton WireGuard | Not yet implemented | Requires BoringTun plus a user-space IP/TCP stack; the old Wintun adapter was removed because it required admin. |
+| Proxy via OpenVPN | Not yet implemented | Requires OpenVPN 3 client core or equivalent plus the same user-space packet/stream bridge. |
+| Proton Stealth without ProTun | Not yet implemented | Needs a compatible independent transport; generic WireGuard TLS is not Proton Stealth. |
+| DNS inside Proton tunnel | Not yet implemented | Must be integrated into the user-space network stack to avoid local DNS leakage. |
+| No imported VPN profiles | Not yet complete | Existing legacy profile code remains, but is not the desired final connection workflow. |
+| No administrator privileges | Required by design | No driver installation or system-wide route changes in the proxy-only architecture. |
 
-The API/provisioning code is in source but must still pass the latest Windows CI build and be tested against a real authenticated Proton account. A green compile does not validate live API responses or a working VPN tunnel.
+Build success only verifies compilation and packaging. No live Proton VPN tunnel is currently claimed as operational.

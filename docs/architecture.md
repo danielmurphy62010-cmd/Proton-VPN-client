@@ -2,53 +2,41 @@
 
 ## Processes
 
-`proton-vpn-client.exe` is the Rust supervisor. It starts the existing Tor Expert Bundle, owns the local HTTP API and explicit HTTP proxy, starts the Qt helper, and manages tunnel child processes. On Windows it uses a Job Object configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` to clean up child processes when the supervisor exits.
+`proton-vpn-client.exe` is the Rust supervisor. It starts portable Tor, owns the local HTTP API and explicit HTTP proxy, launches the Qt UI, and supervises background tasks. The Qt process communicates with the supervisor over a random-token-protected loopback HTTP API.
 
-The Qt 6 helper (`proton-vpn-gui.exe`) provides the card-based interface and an embedded Proton sign-in browser. It receives a random local API token and ephemeral API port through its environment.
+## Proxy-only operating model
 
-## Tor and Proton API traffic
+The proxy listener is `127.0.0.1:8080`. It accepts HTTP absolute-form requests and HTTPS CONNECT, then opens an upstream connection according to the selected route. The existing routes are Tor SOCKS5 and the normal system route.
 
-The supervisor starts Tor from the portable layout:
+This design intentionally avoids a system-wide Windows tunnel interface. It must not install Wintun/TAP, write Windows default routes, require a privileged service, or request elevation. Only applications explicitly configured to use the local proxy are routed through it.
+
+## Proton API and Tor
+
+Tor is started from the portable directory:
 
 - `Tor/tor/tor.exe`
-- `Tor/data/geoip` and `Tor/data/geoip6` when supplied
+- optional `Tor/data/geoip` and `Tor/data/geoip6`
 - `Tor/state/` for runtime state
 
-The supervisor waits for SOCKS5 on `127.0.0.1:9050` before exposing the GUI. The Rust Proton API client disables system/environment proxy settings and explicitly uses `socks5h://127.0.0.1:9050`, so Proton API requests and their DNS lookup go through Tor. It does not silently fall back to a direct API connection.
+All Proton API calls use SOCKS5H at `127.0.0.1:9050`, so API DNS resolution occurs on the Tor side. The API client requests account/plan data, server/relay metadata, client protocol ports and a device certificate. Client private-key material and the certificate are kept in memory.
 
-After browser sign-in, the Qt WebEngine request interceptor observes HTTPS requests to Proton-owned domains. It forwards only the Bearer token and `x-pm-uid` pair to the authenticated local API. The local API clears any previous VPN provisioning state when a new session is loaded.
+## VPN-over-proxy work remaining
 
-## Proton provisioning
+A raw WireGuard or OpenVPN tunnel carries IP packets; an HTTP proxy expects byte streams. A no-admin implementation therefore needs a user-space IP/TCP stack between them:
 
-An API refresh requests three data groups through Tor:
+1. The HTTP proxy asks the VPN stack to open a virtual TCP connection to the requested destination.
+2. The user-space TCP/IP stack turns HTTP proxy stream bytes into IP packets.
+3. The WireGuard/OpenVPN engine encrypts and transports those packets to Proton.
+4. Decrypted reply packets are fed back into the user-space stack and exposed as a stream to the proxy.
+5. DNS queries are sent through that same virtual stack to a tunnel-side resolver.
 
-1. `/vpn/v2/logicals`: logical and physical server records, per-protocol relay addresses, server metadata and load/status.
-2. `/vpn/v2`: VPN account entitlement, plan and connection limits.
-3. `/vpn/v2/clientconfig`: default OpenVPN/WireGuard port lists and Smart Protocol availability.
+BoringTun is retained as the WireGuard protocol library, but the previous Wintun interface prototype was removed because it required administrator privileges and changed system routes. The user-space TCP/IP-to-WireGuard bridge has not yet been completed.
 
-The backend expands the protocol entry addresses using Proton's own returned port lists. It does not invent a universal port number.
+OpenVPN requires an embedded OpenVPN 3 client core (or equivalent) and a compatible user-space packet interface. Proton Stealth requires a compatible protocol implementation; it is not safe to substitute generic TLS-wrapped WireGuard and call it Stealth.
 
-After refreshing, the backend generates an Ed25519 key pair, builds the public key PEM, requests a client device certificate from `/vpn/v1/certificate`, and derives the related X25519 private key using SHA-512 plus the X25519 scalar clamp. The generated private key and certificate are retained in process memory and are not serialized into the user config or logs.
+## Security boundaries
 
-These API routes and request formats are based on the current official Windows client implementation. They are not a stable, documented third-party VPN SDK contract.
-
-## Tunnel status and remaining integration
-
-The API/server/certificate provisioning data is now available in memory. However, the existing connection path has not yet been rewritten to consume it. It still selects imported local profiles and launches external OpenVPN/WireGuard executables.
-
-A no-import workflow requires a protocol adapter that:
-- selects a Proton logical/physical server and a protocol-compatible endpoint;
-- builds runtime tunnel settings from the issued device credentials and server metadata;
-- starts and supervises a bundled engine;
-- configures the Windows virtual adapter, routes, DNS and cleanup policy;
-- verifies tunnel readiness before reporting the connection as active.
-
-No native OpenVPN/WireGuard engine, Windows driver installer, kill switch, or Proton-compatible Stealth implementation is currently bundled. Proton's current Windows app uses additional service/native-driver components for those tasks.
-
-## Local proxy
-
-The explicit HTTP proxy listens at `127.0.0.1:8080`. It handles HTTP absolute-form requests and HTTPS CONNECT requests. In Tor mode, proxy TCP streams go through Tor SOCKS5. In other modes, the proxy connects using the Windows system route. It is not a transparent proxy and does not create or enforce a full-system tunnel.
-
-## Measurement
-
-The current measurement is a TCP connect to `1.1.1.1:443`, not ICMP. It follows the active route and is attributed only to the active profile. JSON retains the latest 200 points.
+- API credentials and generated private keys are held in memory.
+- Local API and HTTP proxy bind to loopback only.
+- No VPN connection should be reported as active until the real protocol handshake and proxy data path are verified.
+- No system route or network adapter is modified by the intended proxy-only model.

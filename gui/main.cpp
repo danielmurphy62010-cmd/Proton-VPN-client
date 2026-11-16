@@ -604,20 +604,6 @@ private:
             }
         });
         serversBody->addWidget(refreshServers);
-        auto *connectServer = new QPushButton("Connect selected server (WireGuard UDP)");
-        connectServer->setObjectName("primaryButton");
-        connect(connectServer, &QPushButton::clicked, this, [this] {
-            const int row = m_servers->currentRow();
-            if (row < 0 || !m_servers->item(row, 0)) {
-                QMessageBox::information(this, "Select a server", "Select a Proton server row first.");
-                return;
-            }
-            const QString serverId = m_servers->item(row, 0)->data(Qt::UserRole).toString();
-            const auto result = request("POST", "/api/connect",
-                QJsonObject{{"server_id", serverId}, {"protocol", "wireguard_udp"}});
-            if (!result.isNull()) refreshStatus();
-        });
-        serversBody->addWidget(connectServer);
         profilesOuter->addWidget(serversCard, 4);
         m_pages->addWidget(profilesPage);
 
