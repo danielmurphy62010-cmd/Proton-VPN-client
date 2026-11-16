@@ -35,6 +35,7 @@ pub struct AppState {
     runtime: Arc<Mutex<RuntimeState>>,
     credentials: Arc<RwLock<Option<ApiCredentials>>>,
     servers: Arc<RwLock<Vec<ProtonServer>>>,
+    proton_snapshot: Arc<RwLock<Option<api::ProtonSnapshot>>>,
 }
 struct RuntimeState {
     status: String,
@@ -93,6 +94,7 @@ impl AppState {
             })),
             credentials: Arc::new(RwLock::new(None)),
             servers: Arc::new(RwLock::new(Vec::new())),
+            proton_snapshot: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -107,6 +109,21 @@ impl AppState {
             // Independent simultaneous VPN routes require distinct TUN interfaces and policy routing.
             concurrent_vpn_sessions_supported: false,
         }
+    }
+
+
+    pub async fn ensure_tor_ready(&self) -> Result<()> {
+        self.start_tor_if_needed().await?;
+        for _ in 0..80 {
+            match TcpStream::connect("127.0.0.1:9050").await {
+                Ok(stream) => {
+                    drop(stream);
+                    return Ok(());
+                }
+                Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
+            }
+        }
+        bail!("Tor SOCKS5 did not become ready on 127.0.0.1:9050; Proton API requests are blocked rather than sent directly.");
     }
 
     pub async fn route_for_proxy(&self) -> ProxyRoute {
@@ -206,6 +223,7 @@ pub async fn build_router(api_state: ApiState) -> Router {
         .route("/api/auth/session", post(set_session))
         .route("/api/servers", get(get_servers))
         .route("/api/servers/refresh", post(refresh_servers))
+        .route("/api/proton/snapshot", get(get_proton_snapshot))
         .route("/api/profiles/import", post(import_profile))
         .route("/api/profiles/remove", post(remove_profile))
         .route("/api/connect", post(connect))
@@ -256,14 +274,20 @@ async fn get_servers(State(state): State<ApiState>) -> Json<Vec<ProtonServer>> {
 }
 async fn refresh_servers(State(state): State<ApiState>) -> Result<Json<Vec<ProtonServer>>, (StatusCode, String)> {
     let credentials = state.app.credentials.read().await.clone()
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "No Proton API access token and UID are loaded. A website cookie alone is not an API bearer token.".into()))?;
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "No Proton API access token and UID are loaded.".into()))?;
+    state.app.ensure_tor_ready().await.map_err(api_error)?;
     let cfg = state.app.config.read().await.clone();
-    let servers = api::fetch_logical_servers(&cfg.proton_api_base, &credentials).await.map_err(api_error)?;
-    fs::create_dir_all("./data").map_err(api_error)?;
-    fs::write("./data/proton-servers.json", serde_json::to_vec_pretty(&servers).map_err(api_error)?)
-        .map_err(api_error)?;
+    let snapshot = api::fetch_snapshot(&cfg.proton_api_base, &credentials).await.map_err(api_error)?;
+    let servers = snapshot.servers.clone();
     *state.app.servers.write().await = servers.clone();
+    *state.app.proton_snapshot.write().await = Some(snapshot);
     Ok(Json(servers))
+}
+
+async fn get_proton_snapshot(State(state): State<ApiState>) -> Result<Json<api::ProtonSnapshot>, (StatusCode, String)> {
+    state.app.proton_snapshot.read().await.clone()
+        .map(Json)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Proton account/server data has not been fetched yet. Refresh the Proton server list first.".into()))
 }
 async fn import_profile(State(state): State<ApiState>, Json(payload): Json<ImportPayload>) -> Result<Json<Profile>, (StatusCode, String)> {
     if !matches!(&payload.protocol, Mode::OpenVpn | Mode::WireGuard | Mode::Stealth) {

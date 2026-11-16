@@ -39,6 +39,7 @@ async fn main() -> Result<()> {
     }
     let proxy_bind = config.proxy_bind.clone();
     let app = AppState::new(config);
+    app.ensure_tor_ready().await.context("starting bundled Tor before launching the client")?;
     let client_token = uuid::Uuid::new_v4().to_string();
 
     let (api_handle, quit_rx, api_port) = runtime::serve_api(app.clone(), client_token.clone()).await?;
