@@ -604,6 +604,20 @@ private:
             }
         });
         serversBody->addWidget(refreshServers);
+        auto *connectServer = new QPushButton("Connect selected server (WireGuard UDP)");
+        connectServer->setObjectName("primaryButton");
+        connect(connectServer, &QPushButton::clicked, this, [this] {
+            const int row = m_servers->currentRow();
+            if (row < 0 || !m_servers->item(row, 0)) {
+                QMessageBox::information(this, "Select a server", "Select a Proton server row first.");
+                return;
+            }
+            const QString serverId = m_servers->item(row, 0)->data(Qt::UserRole).toString();
+            const auto result = request("POST", "/api/connect",
+                QJsonObject{{"server_id", serverId}, {"protocol", "wireguard_udp"}});
+            if (!result.isNull()) refreshStatus();
+        });
+        serversBody->addWidget(connectServer);
         profilesOuter->addWidget(serversCard, 4);
         m_pages->addWidget(profilesPage);
 
@@ -1014,7 +1028,11 @@ private:
             const QStringList cells{server.value("name").toString(), server.value("country").toString(),
                 server.value("city").toString(), QString::number(server.value("load").toInt()),
                 QString::number(server.value("tier").toInt()), protocols.trimmed(), ips.join(", ")};
-            for (int col = 0; col < cells.size(); ++col) m_servers->setItem(row, col, new QTableWidgetItem(cells[col]));
+            for (int col = 0; col < cells.size(); ++col) {
+                auto *item = new QTableWidgetItem(cells[col]);
+                if (col == 0) item->setData(Qt::UserRole, server.value("id").toString());
+                m_servers->setItem(row, col, item);
+            }
         }
     }
 
