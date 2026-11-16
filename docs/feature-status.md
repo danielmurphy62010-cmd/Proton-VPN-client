@@ -2,22 +2,24 @@
 
 | Feature | Status | Notes |
 |---|---|---|
-| Qt 6 tray-only window | Implemented in UI source | Window starts hidden; tray trigger opens it; close hides it. |
-| GUI configuration | Implemented for supported settings | Mode, country filters, profile selection, fallback, paths, proxy, weights and benchmark controls. |
-| Proton logical server JSON | Implemented, authenticated | Requires API Bearer token and UID. API response returns per-protocol entry IPs. |
-| All physical IP/port pairs | Partial | Entry IPs are flattened. API payload inspected does not provide a universal port for every protocol endpoint; port remains null. |
-| OpenVPN profile import/launch | Implemented with external dependencies | Requires an installed OpenVPN executable and a preinstalled/usable TUN driver; not tested on this host. |
-| WireGuard static config | Partial | wireguard-go plus wg setconf launch is present; an installed Wintun driver and route setup may be required. |
-| WireGuard config generation via Proton API | Not implemented | Proton's configuration-generation flow is not exposed as a stable public third-party interface in the sources reviewed. |
-| Proton Stealth | External hook only | No native implementation. The Proton Windows app uses its ProTun TLS backend; user asked not to use ProTun. |
-| Tor always-on supervision | Implemented in source | Starts/restarts Tor if configured executable exists. |
-| Mini-browser through Tor | Implemented in UI source | Qt WebEngine Chromium proxy is set to Tor SOCKS5; site cookies are retained in its own profile. |
-| Cookie-to-API authentication | Not implemented | API needs Bearer token + UID. Website cookies are not silently treated as API credentials. |
-| Local HTTP proxy | Implemented in source | Loopback-only HTTP proxy; Tor mode uses SOCKS5, otherwise uses the system route. |
-| 1–20 simultaneous isolated VPN connections | Not implemented | No-admin Windows cannot establish independent policy-routed tunnel interfaces through a local HTTP proxy. Fallback attempts are sequential. |
-| Protocol changes preserve active connection | Implemented | Config updates do not mutate the active child/session; disconnect is required before reconnecting. |
-| Process cleanup on force termination | Implemented in source | Windows Job Object kill-on-close. Requires successful assignment at startup. |
-| Ping telemetry | Partial | Active route only, TCP connect to 1.1.1.1:443 rather than ICMP. 200 rolling samples and a capped count. |
-| Benchmark mode | Partial | Separate interval/weights and random rotation among enabled profiles; measurements are active-route TCP connect. |
+| Card-based Qt GUI | Implemented in source | Connections, Analytics, Profiles & Servers, Config; main window is visible at startup. |
+| Non-modal Proton sign-in window | Implemented in source | Can be used without blocking the main client. |
+| Browser login detection | Implemented in source | Captures Proton Bearer and UID headers from HTTPS Proton-domain requests; does not read password or cookies. |
+| Proton account/plan API | Implemented in source | `GET /vpn/v2`; routed through Tor. |
+| Proton logical servers | Implemented in source | `GET /vpn/v2/logicals`; includes protocol-specific relay addresses and metadata. |
+| Proton client protocol/port settings | Implemented in source | `GET /vpn/v2/clientconfig`; server-advertised ports are used rather than guessed. |
+| Proton device certificate request | Implemented in source | Generates Ed25519 keypair and calls `POST /vpn/v1/certificate`; issued certificate and key remain memory-only. |
+| Ed25519 to X25519 client key derivation | Implemented in source | Mirrors the conversion used by Proton's Windows client. |
+| Proton API over Tor | Implemented in source | Reqwest client uses `socks5h://127.0.0.1:9050`; startup and API refresh fail closed if Tor is unavailable. |
+| API-driven connection plan/configuration | Not yet implemented | API snapshot and device credentials are fetched, but they are not yet used to create a live tunnel. |
+| No imported VPN profiles | Not yet implemented | Current connection path still depends on user-imported `.ovpn` / `.conf` profiles. |
+| Bundled native OpenVPN engine | Not implemented | Existing process adapter still expects an external OpenVPN executable. |
+| Native WireGuard engine | Not implemented | Existing process adapter still expects wireguard-go and wg executables and does not bundle them. |
+| Proton Stealth without ProTun | Not implemented | No compatible alternative has been implemented. Do not label generic WireGuard TLS as Proton Stealth. |
+| Local HTTP CONNECT proxy | Implemented in source | Loopback only at `127.0.0.1:8080`; explicit proxy, not transparent system-wide routing. |
+| Tor supervision | Implemented in source | Starts the existing portable Tor Expert Bundle before launching the client. |
+| Multiple simultaneous independent VPN routes | Not implemented | Existing backend only supports one active system route; no per-interface routing engine. |
+| Ping telemetry | Partial | TCP connect to `1.1.1.1:443`, not ICMP; attributed to active profile only. |
+| Benchmark mode | Partial | Separate interval/weights and profile rotation remain tied to imported profiles. |
 
-The source has not been compiled or executed in this environment because a Rust toolchain and Qt 6 SDK are unavailable here. The build script and Windows CI should be used to verify the actual target environment.
+The API/provisioning code is in source but must still pass the latest Windows CI build and be tested against a real authenticated Proton account. A green compile does not validate live API responses or a working VPN tunnel.
