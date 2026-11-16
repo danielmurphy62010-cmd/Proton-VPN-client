@@ -327,25 +327,25 @@ pub async fn fetch_snapshot(
     for logical in logicals.logical_servers {
         let mut endpoints = Vec::new();
         for physical in logical.servers {
-            if let Some(entries) = physical.per_protocol {
+            if let Some(entries) = physical.per_protocol.as_ref() {
                 add_endpoints(
-                    &mut endpoints, "wireguard_udp", entries.wireguard_udp,
+                    &mut endpoints, "wireguard_udp", entries.wireguard_udp.as_ref(),
                     &client_config.default_ports.wireguard.udp, &physical,
                 );
                 add_endpoints(
-                    &mut endpoints, "wireguard_tcp", entries.wireguard_tcp,
+                    &mut endpoints, "wireguard_tcp", entries.wireguard_tcp.as_ref(),
                     &client_config.default_ports.wireguard.tcp, &physical,
                 );
                 add_endpoints(
-                    &mut endpoints, "wireguard_tls", entries.wireguard_tls,
+                    &mut endpoints, "wireguard_tls", entries.wireguard_tls.as_ref(),
                     &client_config.default_ports.wireguard.tls, &physical,
                 );
                 add_endpoints(
-                    &mut endpoints, "openvpn_udp", entries.openvpn_udp,
+                    &mut endpoints, "openvpn_udp", entries.openvpn_udp.as_ref(),
                     &client_config.default_ports.openvpn.udp, &physical,
                 );
                 add_endpoints(
-                    &mut endpoints, "openvpn_tcp", entries.openvpn_tcp,
+                    &mut endpoints, "openvpn_tcp", entries.openvpn_tcp.as_ref(),
                     &client_config.default_ports.openvpn.tcp, &physical,
                 );
             }
@@ -387,7 +387,7 @@ pub async fn fetch_snapshot(
 fn add_endpoints(
     out: &mut Vec<ServerEndpoint>,
     protocol: &str,
-    entry: Option<ProtocolEntry>,
+    entry: Option<&ProtocolEntry>,
     ports: &[u16],
     physical: &PhysicalServer,
 ) {
@@ -449,7 +449,7 @@ mod tests {
         let mut out = Vec::new();
         add_endpoints(
             &mut out, "wireguard_udp",
-            entries.wireguard_udp.as_ref().map(|e| ProtocolEntry { ipv4: e.ipv4.clone() }),
+            entries.wireguard_udp.as_ref(),
             &[443, 1194], physical,
         );
         assert_eq!(out.len(), 2);
