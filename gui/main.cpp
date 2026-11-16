@@ -7,9 +7,11 @@
 #include <QStringList>
 #include <QCheckBox>
 #include <QCloseEvent>
+#include <QColor>
 #include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHeaderView>
@@ -25,6 +27,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPalette>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSpinBox>
@@ -63,6 +66,7 @@ public:
 
         m_view = new QWebEngineView(this);
         const QString appData = QCoreApplication::applicationDirPath() + "/data";
+        QDir().mkpath(appData);
         m_profile = new QWebEngineProfile("ProtonTorLogin", this);
         m_profile->setPersistentStoragePath(appData + "/tor-login-profile");
         m_profile->setCachePath(appData + "/tor-login-cache");
@@ -90,7 +94,8 @@ public:
     MainWindow(QString apiBase, QString apiToken, QString proxyAddress)
         : m_apiBase(std::move(apiBase)), m_apiToken(std::move(apiToken)), m_proxyAddress(std::move(proxyAddress)) {
         setWindowTitle("Proton VPN Client");
-        resize(1080, 760);
+        resize(1280, 900);
+        setMinimumSize(1000, 700);
         buildUi();
         buildTray();
         loadConfig();
