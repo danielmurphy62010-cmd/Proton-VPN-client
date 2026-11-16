@@ -96,7 +96,7 @@ fn resolve_app_path(path: &std::path::Path) -> PathBuf {
         return path.to_path_buf();
     }
     if path.exists() {
-        return path.to_path_buf();
+        return path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     }
     if let Ok(executable) = std::env::current_exe() {
         if let Some(dir) = executable.parent() {
