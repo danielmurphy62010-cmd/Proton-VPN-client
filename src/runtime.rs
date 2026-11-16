@@ -42,6 +42,7 @@ struct RuntimeState {
     active: Option<ActiveConnection>,
     vpn_child: Option<Child>,
     tor_child: Option<Child>,
+    active_connection_counted: bool,
     metrics: HashMap<String, ProfileMetrics>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -87,7 +88,8 @@ impl AppState {
             config: Arc::new(RwLock::new(config)),
             runtime: Arc::new(Mutex::new(RuntimeState {
                 status: "starting".into(), message: "Starting Tor and local proxy".into(),
-                active: None, vpn_child: None, tor_child: None, metrics: HashMap::new(),
+                active: None, vpn_child: None, tor_child: None,
+                active_connection_counted: false, metrics: HashMap::new(),
             })),
             credentials: Arc::new(RwLock::new(None)),
             servers: Arc::new(RwLock::new(Vec::new())),
@@ -163,6 +165,7 @@ impl AppState {
         if let Some(mut child) = rt.vpn_child.take() { stop_child(&mut child).await; }
         if let Some(mut child) = rt.tor_child.take() { stop_child(&mut child).await; }
         rt.active = None;
+        rt.active_connection_counted = false;
         rt.status = "stopped".into();
         rt.message = "All managed child processes were stopped".into();
     }
@@ -275,6 +278,7 @@ async fn disconnect(State(state): State<ApiState>) -> Result<Json<StatusView>, (
     let mut rt = state.app.runtime.lock().await;
     if let Some(mut child) = rt.vpn_child.take() { stop_child(&mut child).await; }
     rt.active = None;
+    rt.active_connection_counted = false;
     rt.status = "disconnected".into();
     rt.message = "VPN profile disconnected; Tor remains running".into();
     drop(rt);
@@ -335,6 +339,7 @@ pub async fn connect_internal(app: &AppState, requested_id: Option<&str>) -> Res
             if rt.tor_child.is_none() { bail!("Tor could not be started; see the status message for the configured executable path."); }
             rt.active = Some(ActiveConnection { profile_id: None, profile_name: "Tor".into(),
                 protocol: Mode::Tor, route: "tor".into(), since: chrono::Utc::now().to_rfc3339() });
+            rt.active_connection_counted = false;
             rt.status = "connected".into();
             rt.message = "HTTP proxy traffic is routed through Tor SOCKS5".into();
             return Ok(());
@@ -343,6 +348,7 @@ pub async fn connect_internal(app: &AppState, requested_id: Option<&str>) -> Res
             let mut rt = app.runtime.lock().await;
             rt.active = Some(ActiveConnection { profile_id: None, profile_name: "LAN / direct".into(),
                 protocol: Mode::Lan, route: "system".into(), since: chrono::Utc::now().to_rfc3339() });
+            rt.active_connection_counted = false;
             rt.status = "connected".into();
             rt.message = "HTTP proxy traffic uses the normal Windows route".into();
             return Ok(());
@@ -369,8 +375,8 @@ pub async fn connect_internal(app: &AppState, requested_id: Option<&str>) -> Res
         match process::spawn_profile_process(&mode, &profile, &cfg).await {
             Ok(child) => {
                 let mut rt = app.runtime.lock().await;
-                rt.metrics.entry(profile.id.clone()).or_default().record_connection(true);
                 rt.vpn_child = Some(child);
+                rt.active_connection_counted = false;
                 rt.active = Some(ActiveConnection {
                     profile_id: Some(profile.id.clone()), profile_name: profile.name.clone(),
                     protocol: mode.clone(), route: "system".into(), since: chrono::Utc::now().to_rfc3339(),
@@ -394,12 +400,14 @@ pub async fn connect_internal(app: &AppState, requested_id: Option<&str>) -> Res
             let mut rt = app.runtime.lock().await;
             rt.active = Some(ActiveConnection { profile_id: None, profile_name: "Tor fallback".into(),
                 protocol: Mode::Tor, route: "tor".into(), since: chrono::Utc::now().to_rfc3339() });
+            rt.active_connection_counted = false;
             rt.status = if rt.tor_child.is_some() { "fallback".into() } else { "fallback_unavailable".into() };
             rt.message = format!("No VPN profile started. Tor fallback selected. {}", failures.join(" | "));
         }
         FinalFallback::Lan => {
             rt.active = Some(ActiveConnection { profile_id: None, profile_name: "LAN fallback".into(),
                 protocol: Mode::Lan, route: "system".into(), since: chrono::Utc::now().to_rfc3339() });
+            rt.active_connection_counted = false;
             rt.status = "fallback".into();
             rt.message = format!("No VPN profile started. LAN/direct fallback selected. {}", failures.join(" | "));
         }
@@ -417,6 +425,51 @@ pub async fn run_supervisors(app: AppState) {
     let mut last_rotation = tokio::time::Instant::now();
     loop {
         let cfg = app.config.read().await.clone();
+
+        // Reap VPN children that exit after an initially successful process start.
+        let mut vpn_exit = None;
+        {
+            let mut rt = app.runtime.lock().await;
+            if let Some(child) = rt.vpn_child.as_mut() {
+                if let Ok(Some(status)) = child.try_wait() {
+                    vpn_exit = Some(status.to_string());
+                }
+            }
+            if vpn_exit.is_some() {
+                if let Some(active) = rt.active.take() {
+                    if let Some(profile_id) = active.profile_id {
+                        rt.metrics.entry(profile_id).or_default().record_connection(false);
+                    }
+                }
+                rt.vpn_child = None;
+                rt.active_connection_counted = false;
+                rt.status = "fallback_pending".into();
+                rt.message = format!("VPN process exited unexpectedly: {}", vpn_exit.as_deref().unwrap_or("unknown"));
+            }
+        }
+        if let Some(exit) = vpn_exit {
+            match cfg.final_fallback {
+                FinalFallback::Tor => {
+                    if let Err(error) = app.start_tor_if_needed().await {
+                        tracing::warn!(%error, "Tor fallback could not start");
+                    }
+                    let mut rt = app.runtime.lock().await;
+                    let tor_available = rt.tor_child.is_some();
+                    rt.active = Some(ActiveConnection { profile_id: None, profile_name: "Tor fallback".into(),
+                        protocol: Mode::Tor, route: "tor".into(), since: chrono::Utc::now().to_rfc3339() });
+                    rt.status = if tor_available { "fallback".into() } else { "fallback_unavailable".into() };
+                    rt.message = format!("VPN process exited ({exit}); HTTP proxy moved to Tor fallback");
+                }
+                FinalFallback::Lan => {
+                    let mut rt = app.runtime.lock().await;
+                    rt.active = Some(ActiveConnection { profile_id: None, profile_name: "LAN fallback".into(),
+                        protocol: Mode::Lan, route: "system".into(), since: chrono::Utc::now().to_rfc3339() });
+                    rt.status = "fallback".into();
+                    rt.message = format!("VPN process exited ({exit}); HTTP proxy moved to LAN/direct fallback");
+                }
+            }
+        }
+
         if let Err(error) = app.start_tor_if_needed().await {
             tracing::warn!(%error, "Tor supervisor could not start Tor");
         }
@@ -432,10 +485,19 @@ pub async fn run_supervisors(app: AppState) {
                     let route = if active.route == "tor" { ProxyRoute::Tor } else { ProxyRoute::SystemRoute };
                     let result = probe_cloudflare(route).await;
                     let mut rt = app.runtime.lock().await;
-                    let metrics = rt.metrics.entry(profile_id.clone()).or_default();
-                    metrics.record_probe(result, "tcp_connect_1.1.1.1:443");
-                    let path = PathBuf::from("./data/metrics").join(format!("{profile_id}.json"));
-                    let _ = metrics.save(&path);
+                    let should_record_success = result.is_some() && !rt.active_connection_counted;
+                    {
+                        let metrics = rt.metrics.entry(profile_id.clone()).or_default();
+                        metrics.record_probe(result, "tcp_connect_1.1.1.1:443");
+                        if should_record_success { metrics.record_connection(true); }
+                        let path = PathBuf::from("./data/metrics").join(format!("{profile_id}.json"));
+                        let _ = metrics.save(&path);
+                    }
+                    if should_record_success {
+                        rt.active_connection_counted = true;
+                        rt.status = "connected".into();
+                        rt.message = "VPN process is alive and the active route passed a TCP reachability probe; verify the actual tunnel route separately.".into();
+                    }
                 }
             }
         }
