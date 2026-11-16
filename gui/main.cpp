@@ -195,6 +195,7 @@ private:
     QSystemTrayIcon *m_tray{};
     QTimer *m_timer{};
     QPointer<TorLoginDialog> m_loginBrowser;
+    bool m_authCaptureInProgress{false};
     QStackedWidget *m_pages{};
     QLabel *m_headerDot{};
     QLabel *m_subtitle{};
