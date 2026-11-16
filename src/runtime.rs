@@ -226,6 +226,7 @@ pub async fn build_router(api_state: ApiState) -> Router {
         .route("/api/servers", get(get_servers))
         .route("/api/servers/refresh", post(refresh_servers))
         .route("/api/proton/snapshot", get(get_proton_snapshot))
+        .route("/api/proton/credential-status", get(get_proton_credential_status))
         .route("/api/profiles/import", post(import_profile))
         .route("/api/profiles/remove", post(remove_profile))
         .route("/api/connect", post(connect))
@@ -303,6 +304,15 @@ async fn get_proton_snapshot(State(state): State<ApiState>) -> Result<Json<api::
     state.app.proton_snapshot.read().await.clone()
         .map(Json)
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Proton account/server data has not been fetched yet. Refresh the Proton server list first.".into()))
+}
+
+async fn get_proton_credential_status(State(state): State<ApiState>) -> Json<serde_json::Value> {
+    let status = state.app.vpn_credentials.read().await.as_ref()
+        .map(|credentials| credentials.status.clone());
+    Json(serde_json::json!({
+        "present": status.is_some(),
+        "certificate": status
+    }))
 }
 async fn import_profile(State(state): State<ApiState>, Json(payload): Json<ImportPayload>) -> Result<Json<Profile>, (StatusCode, String)> {
     if !matches!(&payload.protocol, Mode::OpenVpn | Mode::WireGuard | Mode::Stealth) {
